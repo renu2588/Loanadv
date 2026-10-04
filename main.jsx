@@ -12,3 +12,5 @@ class EB extends React.Component {
 }
 
 import('./App.jsx').then((m) => createRoot(document.getElementById('root')).render(<EB><m.default /></EB>)).catch((e) => show(e.stack || e))
+
+if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}))
