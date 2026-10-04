@@ -29,7 +29,7 @@ function Chart({ out }) {
 function Login() {
   const [em, setEm] = useState(''), [pw, setPw] = useState(''), [err, setErr] = useState('')
   const go = () => signIn(em, pw).catch(() => setErr('Sign in failed. Check email and password.'))
-  return <main><h2>Loan Tracker</h2><p>Sign in to continue.</p><div className="set"><label>Email</label><input value={em} onChange={(e) => setEm(e.target.value)} />
+  return <main><h2>Loan Tracker</h2><p>Sign in to continue. <small>(build v3)</small></p><div className="set"><label>Email</label><input value={em} onChange={(e) => setEm(e.target.value)} />
     <label>Password</label><input type="password" value={pw} onChange={(e) => setPw(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && go()} />
     <p><button onClick={go}>Sign In</button> <span style={{ color: 'crimson' }}>{err}</span></p></div></main>
 }
@@ -40,3 +40,38 @@ export default function App() {
   useEffect(() => onUser((u) => setUser(u || null)), [])
   useEffect(() => { if (!user) return; ready.current = false
     load(user.uid).then((d) => { setData(d || seed); ready.current = true }).catch((e) => setMsg(String(e))) }, [user])
+  useEffect(() => { if (!user || !data || !ready.current) return
+    const t = setTimeout(() => save(user.uid, data).then(() => setMsg('Saved')).catch((e) => setMsg('Save failed: ' + e.message)), 800)
+    return () => clearTimeout(t) }, [data])
+  const res = useMemo(() => (data ? compute(data.settings, data.rows) : null), [data])
+
+  if (user === undefined) return <p style={{ padding: 20 }}>Loading…</p>
+  if (!user) return <><style>{css}</style><Login /></>
+  if (!data) return <p style={{ padding: 20 }}>Loading data… {msg}</p>
+
+  const setRow = (i, k, v) => setData((d) => ({ ...d, rows: d.rows.map((r, j) => (j === i ? { ...r, [k]: v === '' ? (k === 'interest' ? null : 0) : +v } : r)) }))
+  const setSet = (k, v) => setData((d) => ({ ...d, settings: { ...d.settings, [k]: +v } }))
+  const Inp = ({ i, k, v }) => <input type="number" value={v ?? ''} onChange={(e) => setRow(i, k, e.target.value)} />
+  const cards = [['Loan amount', inr(data.settings.loanAmount)], ['Current balance', inr(res.currentBalance), 'as of ' + res.currentAsOf],
+    ['Total interest', inr(res.interest)], ['Principal paid', inr(res.principal)], ['Total payment', inr(res.total)],
+    ['Tenure', res.months + ' months (~' + res.years + ' yrs)'], ['Closing month', res.closing],
+    ['Original plan EMI', inr(res.origEmi)], ['Original plan interest', inr(res.origInterest)], ['Interest saved vs original', inr(res.origInterest - res.interest)]]
+
+  return <><style>{css}</style>
+    <header><h1>Loan Tracker</h1><span>{msg}</span><button onClick={() => setDark(!dark)}>🌙 Theme</button><span>{user.email || user.displayName}</span>{configured && <button className="alt" onClick={signOutUser}>Sign out</button>}</header>
+    <main><div className="tabs">{[['dash', 'Dashboard'], ['sched', 'Schedule'], ['set', 'Settings']].map(([k, n]) => <button key={k} className={tab === k ? 'on' : 'alt'} onClick={() => setTab(k)}>{n}</button>)}</div>
+      {tab === 'dash' && <><div className="cards">{cards.map(([n, v, s]) => <div className="card" key={n}><span>{n}</span><b>{v}</b>{s && <span>{s}</span>}</div>)}</div><Chart out={res.out} /></>}
+      {tab === 'sched' && <><p><button onClick={() => setData((d) => { const l = d.rows[d.rows.length - 1], x = new Date(l.date + 'T00:00:00Z'); x.setUTCMonth(x.getUTCMonth() + 1)
+          return { ...d, rows: [...d.rows, { ...l, date: x.toISOString().slice(0, 10), disb: 0, extra: 0, interest: null }] } })}>+ Add month</button>{' '}
+        <span>Leave "Actual int." blank to project at the current rate. Green rows = actual interest entered.</span></p>
+        <div className="wrap"><table><thead><tr>{['Month', 'Disbursed', 'EMI', 'Step-up ×', 'Extra EMI', 'Cash parked', 'Actual int.', 'Interest', 'Principal', 'Closing'].map((h) => <th key={h}>{h}</th>)}</tr></thead>
+          <tbody>{res.out.map((r) => { const row = data.rows[r.i]; return <tr key={r.i} className={r.pre ? 'pre' : r.actual ? 'act' : r.ext ? 'ext' : ''}>
+            <td>{r.date.slice(0, 7)}</td>{row ? <><td><Inp i={r.i} k="disb" v={row.disb} /></td><td><Inp i={r.i} k="emi" v={row.emi} /></td><td><Inp i={r.i} k="mult" v={row.mult} /></td>
+              <td><Inp i={r.i} k="extra" v={row.extra} /></td><td><Inp i={r.i} k="cash" v={row.cash} /></td><td><Inp i={r.i} k="interest" v={row.interest} /></td></> : <td colSpan={6}>projected</td>}
+            <td>{inr(r.X)}</td><td>{inr(r.Y)}</td><td>{inr(r.AA)}</td></tr> })}</tbody></table></div></>}
+      {tab === 'set' && <div className="set">{sets.map(([k, n]) => <div key={k}><label>{n}</label><input type="number" step="any" value={data.settings[k]} onChange={(e) => setSet(k, e.target.value)} /></div>)}
+        <p><button className="alt" onClick={() => { const b = new Blob([JSON.stringify(data)], { type: 'application/json' }), l = document.createElement('a'); l.href = URL.createObjectURL(b); l.download = 'loan-backup.json'; l.click() }}>Download backup</button></p>
+        <label>Restore from backup (.json) - replaces current data</label><input type="file" accept=".json" onChange={(e) => { const f = e.target.files[0]; f && f.text().then((t) => { try { const d = JSON.parse(t); if (d.settings && d.rows) { setData(d); setMsg('Restored') } else setMsg('Invalid backup') } catch { setMsg('Invalid backup') } }) }} />
+        <p><button className="alt" onClick={() => confirm('Reset all data to the Excel import?') && setData(seed)}>Reset to Excel data</button></p></div>}
+    </main></>
+}
